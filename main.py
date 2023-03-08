@@ -1,11 +1,13 @@
 import threading
 import time
+import sys
+import asyncio
 
 from MroFtpClass import FtpScanClass, FtpDirDB
 
 
 class FtpScanThread(threading.Thread):
-    def __init__(self, ftp_info, interval=60):
+    def __init__(self, ftp_info, interval):
         super().__init__()
         self.ftpinfo = ftp_info
         self.interval = interval
@@ -33,21 +35,14 @@ class FtpScanThread(threading.Thread):
         self.stopped = True
 
 
-if __name__ == '__main__':
-    ftpinfo = {
-        'name': 'TEST1',
-        'host': '172.29.106.147',
-        'user': 'nixevol',
-        'passwd': '242520',
-        'syncpath': '/sync/'
-    }
-
-    ftp_scan_thread = None
+async def handle_user_input():
+    global ftp_scan_thread
     while True:
-        cmd = input("Enter command (start, stop): ")
+        cmd = await asyncio.get_event_loop().run_in_executor(None, input, "Enter command (start, stop): ")
         if cmd == "start":
             if not ftp_scan_thread or not ftp_scan_thread.is_alive():
                 ftp_scan_thread = FtpScanThread(ftpinfo, interval=10)
+                ftp_scan_thread.daemon = True
                 ftp_scan_thread.start()
                 print("Thread started.")
             else:
@@ -64,8 +59,21 @@ if __name__ == '__main__':
                 ftp_scan_thread.stop()
                 ftp_scan_thread.join()
                 print("Thread stopped.")
-            exit()
+            sys.exit()
         elif cmd == 'del':
             FtpDirDB().dellog_by_time('2023-03-09 10:00:00')
         else:
             print("Invalid command. Please enter 'start' or 'stop'.")
+
+
+if __name__ == '__main__':
+    ftpinfo = {
+        'name': 'TEST1',
+        'host': '172.29.106.147',
+        'user': 'nixevol',
+        'passwd': '242520',
+        'syncpath': '/sync/'
+    }
+
+    ftp_scan_thread = None
+    asyncio.run(handle_user_input())
