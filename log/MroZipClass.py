@@ -29,7 +29,7 @@ class MroParse:
                 raise ValueError(f"Unsupported file type: {file_type}")
         return file_type
 
-    def get_file_list(self):
+    def get_sub_list(self):
         """
         获取压缩包内的文件列表
         """
@@ -50,7 +50,7 @@ class MroParse:
         self.file_stream.seek(0)
         return file_list
 
-    def get_subzip_io(self, filename):
+    def get_sub_io(self, filename):
         """
         获取压缩包内指定文件的数据流对象
         """
@@ -78,7 +78,7 @@ class MroParse:
         """
         try:
             with MroParse(subzipio) as parser:
-                file_list = parser.get_file_list()
+                file_list = parser.get_sub_list()
                 xml_list = [f for f in file_list if f.endswith('.xml')]
                 return xml_list
         except Exception:
@@ -91,7 +91,7 @@ class MroParse:
         """
         try:
             with MroParse(subzipio) as parser:
-                file_io = parser.get_subzip_io(xmlfile)
+                file_io = parser.get_sub_io(xmlfile)
                 return file_io
         except Exception:
             return None
