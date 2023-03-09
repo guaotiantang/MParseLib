@@ -8,8 +8,7 @@ from ftputil.error import FTPOSError
 class FtpDirDB:
     def __init__(self):
         self.db_file = os.path.join(os.getcwd(), "log", "FtpDir.db")
-        if not os.path.exists(os.path.join(os.getcwd(), "log")):
-            os.mkdir(os.path.join(os.getcwd(), "log"))
+        os.makedirs(os.path.join(os.getcwd(), "log"), exist_ok=True)
         self.table_name = "MroFileList"
         self.conn = sqlite3.connect(self.db_file, check_same_thread=False)
         self.conn.execute('PRAGMA journal_mode=WAL')
@@ -99,7 +98,7 @@ class FtpScanClass:
         :return: 新增的文件列表
         """
         ftp_name = self.ftpinfo['name']
-        ftp_path = self.ftpinfo['syncpath']
+        ftp_path = self.ftpinfo['sync_path']
         new_files = []
         try:
             for root, dirs, files in self.ftp.walk(ftp_path):
@@ -121,7 +120,7 @@ class FtpScanClass:
         将FTP服务器中所有zip文件路径录入数据库
         """
         ftp_name = self.ftpinfo['name']
-        ftp_path = self.ftpinfo['syncpath']
+        ftp_path = self.ftpinfo['sync_path']
         try:
             for root, dirs, files in self.ftp.walk(ftp_path):
                 for name in files:
@@ -139,3 +138,36 @@ class FtpScanClass:
     def __del__(self):
         self.ftp.close()
 
+
+class MroParseClass:
+    """
+    MRO文件处理程序
+    """
+
+    def __init__(self, ftp_info, filepath):
+        self.ftp_info = ftp_info
+        self.ftp = None
+        self.filepath = filepath
+
+    def file_download(self):
+        """
+        下载zip文件并返回本地路径
+        """
+        try:
+            with ftputil.FTPHost(self.ftp_info['host'], self.ftp_info['user'], self.ftp_info['passwd'], timeout=60) as ftp:
+                ftp_path = os.path.dirname(self.filepath)
+                ftp.chdir(ftp_path)
+                download_path = os.path.join(self.ftp_info['sync_path'], self.ftp_info['name'], self.filepath)
+                os.makedirs(os.path.dirname(download_path), exist_ok=True)
+                ftp.download(self.filepath, download_path)
+                return download_path
+        except ftputil.error.FTPOSError as e:
+            print(f"Error occurred while connecting to FTP server[{self.ftp_info['name']}]: {e}")
+            return ''
+        except ftputil.error.FTPIOError as e:
+            print(f"Error occurred while downloading file {self.filepath}: {e}")
+            return ''
+
+    def file_parse(self, file_path):
+
+        return True

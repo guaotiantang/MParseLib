@@ -72,7 +72,7 @@ if __name__ == '__main__':
         'host': '172.29.106.147',
         'user': 'nixevol',
         'passwd': '242520',
-        'syncpath': '/sync/'
+        'sync_path': '/sync/'
     }
 
     ftp_scan_thread = None
