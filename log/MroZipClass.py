@@ -84,7 +84,7 @@ class MroParse:
         except Exception:
             return []
 
-    def get_xml_byte(self, xmlfile, subzipio):
+    def get_xml_io(self, xmlfile, subzipio):
         """
         通过filetype库判断io数据流对应的文件是zip压缩包还是7z或者tar或者其他类型，
         并且返回该压缩包内指定的xml文件的io数据流对象
