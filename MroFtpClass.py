@@ -138,3 +138,4 @@ class FtpScanClass:
 
     def __del__(self):
         self.ftp.close()
+
