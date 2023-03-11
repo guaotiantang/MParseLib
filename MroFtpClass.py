@@ -25,8 +25,8 @@ class FtpScanClass:
 
     def scan_newfiles(self):
         """
-        扫描FTP目录下所有文件，返回新增的文件列表
-        :return: 新增的文件列表
+        扫描FTP目录下所有文件，返回新增的文件列表及相关信息
+        :return: 新增的文件列表及相关信息
         """
         self.ftpinfo.read()
         ftp_path = self.ftpinfo.sync_path
@@ -40,14 +40,17 @@ class FtpScanClass:
                     if ftp_file.endswith('.zip') and not self.db.isexists(ftp_file):
                         dir_name = self.ftp.path.dirname(ftp_path)
                         if not any(temp_dir in dir_name for temp_dir in scan_filter):
-                            new_files.append(ftp_file)
+                            file_size = self.ftp.path.getsize(ftp_file)
+                            file_mtime = time.time()  # 记录当前扫描时间
+                            file_info = (ftp_file, file_size, file_mtime)
+                            new_files.append(file_info)
 
         except (FTPOSError, Exception) as e:
             print("Error occurred while scanning New FTP directory:", e)
             return []
 
         # 按照文件大小排序
-        sorted_files = sorted(new_files, key=lambda f: self.ftp.stat(f).st_size)
+        sorted_files = sorted(new_files, key=lambda f: f[1])
         return sorted_files
 
     def save_all_files_log(self):
@@ -71,12 +74,16 @@ class FtpScanClass:
             return False
         return True
 
-    def file_download(self, filepath):
+    def file_download(self, file_info):
         """
         下载zip文件并返回本地路径
         """
+        filepath = file_info[0]
         try:
             self.ftpinfo.read()
+            filesize = file_info[1]
+            scantime = file_info[2]
+
             with ftputil.FTPHost(self.ftpinfo.host, self.ftpinfo.user, self.ftpinfo.passwd, self.ftpinfo.port,
                                  timeout=60) as ftp:
                 ftp_path = os.path.dirname(filepath)
@@ -88,14 +95,13 @@ class FtpScanClass:
 
                 os.makedirs(os.path.dirname(download_path), exist_ok=True)
                 # 获取文件初始大小
-                init_size = ftp.stat(filepath).st_size
+                init_size = filesize
                 # 记录文件大小变化时间戳
-                size_change_time = time.time()
+                size_change_time = scantime
                 # 检测文件大小是否发生变化，如果在一段时间内文件大小未发生变化则开始下载
                 while True:
                     if not self.mainstatus.status:
                         break
-                    time.sleep(3)  # 暂停3秒
                     cur_size = ftp.stat(filepath).st_size
                     if cur_size != init_size:
                         init_size = cur_size
@@ -104,6 +110,7 @@ class FtpScanClass:
                         # 文件大小未发生变化9秒，判定为对方已经上传完成
                         ftp.download(filepath, download_path)
                         return download_path
+                    time.sleep(3)  # 暂停3秒
 
         except (ftputil.error.FTPIOError, Exception) as e:
             print(f"Error occurred while downloading file {filepath}: {e}")

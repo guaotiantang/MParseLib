@@ -1,5 +1,4 @@
 import asyncio
-import queue
 import sys
 import threading
 
@@ -8,13 +7,12 @@ from TaskLogClass import *
 
 
 class DownloadThread(threading.Thread):
-    def __init__(self, thread_status, ftp_scan, file_queue, lock, thread_list):
+    def __init__(self, thread_status, ftp_scan, file_queue, lock):
         super().__init__()
         self.status = thread_status
         self.ftp_scan = ftp_scan
         self.file_queue = file_queue
         self.lock = lock
-        self.thread_list = thread_list
 
     def run(self):
         while self.status.status:
@@ -32,11 +30,6 @@ class DownloadThread(threading.Thread):
                     self.lock.release()  # 释放线程锁
                     time.sleep(1)  # 等待一段时间再检查队列是否为空
 
-                if len(self.thread_list) < 2 and not self.file_queue.empty():
-                    new_thread = DownloadThread(self.status, self.ftp_scan, self.file_queue, self.lock,
-                                                self.thread_list)
-                    new_thread.start()
-                    self.thread_list.append(new_thread)
             except Exception as e:
                 print(f"Error occurred while downloading file: {e}")
             time.sleep(1)
@@ -48,19 +41,6 @@ class FtpScanThread(threading.Thread):
         self.interval = interval
         self.status = thread_status
         self.status.set_status(True)
-        self.ftp_scan = FtpScanClass()
-        self.file_queue = queue.Queue()
-        self.lock = threading.Lock()
-        self.thread_list = []
-        if self.ftp_scan.ftp is None:
-            print('error FTP Connect Fail')
-            self.status.set_status(False)
-            return
-
-        for i in range(2):
-            download_thread = DownloadThread(self.status, self.ftp_scan, self.file_queue, self.lock, self.thread_list)
-            self.thread_list.append(download_thread)
-            download_thread.start()
 
     def run(self):
         ftp_scan = FtpScanClass()
@@ -73,13 +53,14 @@ class FtpScanThread(threading.Thread):
                 new_files = ftp_scan.scan_newfiles()
                 if new_files:
                     print(f"Found {len(new_files)} new files")
-                    for file in new_files:
+                    for file_info in new_files:
                         if not self.status.status:
                             break
-                        self.file_queue.put(file)
-                    # 等待下载线程完成
-                    for download_thread in self.thread_list:
-                        download_thread.join()
+                        local_file = ftp_scan.file_download(file_info)
+                        if local_file is not None:
+                            with DownLog() as db:
+                                db.savelog(file_info[0])
+
             except Exception as e:
                 print(f"Error occurred while scanning FTP directory: {e}")
             for i in range(self.interval):
@@ -89,8 +70,6 @@ class FtpScanThread(threading.Thread):
 
     def stop(self):
         self.status.set_status(False)
-        for download_thread in self.thread_list:
-            download_thread.join()
 
 
 async def handle_user_input():
