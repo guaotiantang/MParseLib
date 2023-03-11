@@ -1,3 +1,4 @@
+import threading
 import time
 
 import ftputil
@@ -119,3 +120,40 @@ class FtpScanClass:
     def __del__(self):
         if self.ftp is not None:
             self.ftp.close()
+
+
+class FtpScanThread(threading.Thread):
+    def __init__(self, thread_status, interval):
+        super().__init__()
+        self.interval = interval
+        self.status = thread_status
+        self.status.set_status(True)
+
+    def run(self):
+        ftp_scan = FtpScanClass()
+        if ftp_scan.ftp is None:
+            print('error FTP Connect Fail')
+            self.status.set_status(False)
+
+        while self.status.status:
+            try:
+                new_files = ftp_scan.scan_newfiles()
+                if new_files:
+                    print(f"Found {len(new_files)} new files")
+                    for file_info in new_files:
+                        if not self.status.status:
+                            break
+                        local_file = ftp_scan.file_download(file_info)
+                        if local_file is not None:
+                            with DownLog() as db:
+                                db.savelog(file_info[0])
+
+            except Exception as e:
+                print(f"Error occurred while scanning FTP directory: {e}")
+            for i in range(self.interval):
+                if self.status.status:
+                    break
+                time.sleep(1)
+
+    def stop(self):
+        self.status.set_status(False)

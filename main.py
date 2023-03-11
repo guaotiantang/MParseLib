@@ -1,75 +1,7 @@
 import asyncio
 import sys
-import threading
-
 from MroFtpClass import *
 from TaskLogClass import *
-
-
-class DownloadThread(threading.Thread):
-    def __init__(self, thread_status, ftp_scan, file_queue, lock):
-        super().__init__()
-        self.status = thread_status
-        self.ftp_scan = ftp_scan
-        self.file_queue = file_queue
-        self.lock = lock
-
-    def run(self):
-        while self.status.status:
-            try:
-                self.lock.acquire()  # 获取线程锁
-                if not self.file_queue.empty():
-                    file = self.file_queue.get()
-                    self.lock.release()  # 释放线程锁
-                    local_file = self.ftp_scan.file_download(file)
-                    print(local_file)
-                    if local_file is not None:
-                        with DownLog() as db:
-                            db.savelog(file)
-                else:
-                    self.lock.release()  # 释放线程锁
-                    time.sleep(1)  # 等待一段时间再检查队列是否为空
-
-            except Exception as e:
-                print(f"Error occurred while downloading file: {e}")
-            time.sleep(1)
-
-
-class FtpScanThread(threading.Thread):
-    def __init__(self, thread_status, interval):
-        super().__init__()
-        self.interval = interval
-        self.status = thread_status
-        self.status.set_status(True)
-
-    def run(self):
-        ftp_scan = FtpScanClass()
-        if ftp_scan.ftp is None:
-            print('error FTP Connect Fail')
-            self.status.set_status(False)
-
-        while self.status.status:
-            try:
-                new_files = ftp_scan.scan_newfiles()
-                if new_files:
-                    print(f"Found {len(new_files)} new files")
-                    for file_info in new_files:
-                        if not self.status.status:
-                            break
-                        local_file = ftp_scan.file_download(file_info)
-                        if local_file is not None:
-                            with DownLog() as db:
-                                db.savelog(file_info[0])
-
-            except Exception as e:
-                print(f"Error occurred while scanning FTP directory: {e}")
-            for i in range(self.interval):
-                if self.status.status:
-                    break
-                time.sleep(1)
-
-    def stop(self):
-        self.status.set_status(False)
 
 
 async def handle_user_input():
