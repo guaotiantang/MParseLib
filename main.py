@@ -19,6 +19,7 @@ class FtpScanThread(threading.Thread):
         while not self.stopped:
             try:
                 new_files = ftp_scan.scan_newfiles()
+                print(new_files)
                 if new_files:
                     print(f"Found {len(new_files)} new files: {new_files}")
                     for file in new_files:

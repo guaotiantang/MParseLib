@@ -54,6 +54,7 @@ class FtpDirDB:
             return False
         with self.conn:
             try:
+
                 self.cursor.execute(f"SELECT * FROM {self.table_name} WHERE ftp_name = %s AND filepath = %s",
                                     (ftp_name, filepath))
                 result = self.cursor.fetchone()
@@ -144,18 +145,15 @@ class FtpScanClass:
         try:
             for root, dirs, files in self.ftp.walk(ftp_path):
                 for name in files:
-
                     # 判断是否zip文件和是否在数据库中，不在则添加到新文件列表中
                     ftp_file = self.ftp.path.join(root, name)
-                    if not ftp_file.endswith('.zip'):
-                        continue
-                    if self.db.isexists(ftp_name, ftp_file):
-                        continue
-                    new_files.append(ftp_file)
+                    print(ftp_file)
+                    if ftp_file.endswith('.zip') and self.db.isexists(ftp_name, ftp_file):
+                        new_files.append(ftp_file)
+            return new_files
         except FTPOSError as e:
             print("Error occurred while scanning New FTP directory:", e)
             return []
-        return new_files
 
     def save_all_files_log(self):
         """
