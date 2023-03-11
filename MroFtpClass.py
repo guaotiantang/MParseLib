@@ -1,215 +1,114 @@
-import os
+import time
+
 import ftputil
-from datetime import datetime
 from ftputil.error import FTPOSError
-import pymysql
-
-
-class FtpDirDB:
-    def __init__(self):
-        self.db_host = '127.0.0.1'
-        self.db_port = 3306
-        self.db_user = 'root'
-        self.db_pass = '242520'
-        self.db_name = 'mroparse'
-        self.table_name = "DownLog"
-        self._connect()
-        self.closedb = False
-
-    def _connect(self):
-        try:
-            self.conn = pymysql.connect(
-                host=self.db_host,
-                port=self.db_port,
-                user=self.db_user,
-                password=self.db_pass,
-                database=self.db_name,
-                autocommit=True
-            )
-            self.cursor = self.conn.cursor()
-            self._create_table()
-        except pymysql.Error as e:
-            print(f"Error connecting to MySQL: {e}")
-            self.cursor = None
-            self.conn = None
-
-    def _create_table(self):
-        # 判断数据表是否存在，不存在则创建
-        try:
-            self.cursor.execute(
-                f"SELECT table_name FROM information_schema.tables WHERE table_name='{self.table_name}'")
-            if not self.cursor.fetchone():
-                self.cursor.execute(f"CREATE TABLE {self.table_name} (id INT PRIMARY KEY AUTO_INCREMENT, "
-                                    f"ftp_name VARCHAR(255) NOT NULL, filepath VARCHAR(255) NOT NULL, "
-                                    f"log_time DATETIME NOT NULL)")
-                self.cursor.execute(f"CREATE UNIQUE INDEX ftp_name_index ON {self.table_name} (ftp_name)")
-                self.cursor.execute(f"CREATE UNIQUE INDEX filepath_index ON {self.table_name} (filepath)")
-                self.conn.commit()
-        except pymysql.Error as e:
-            print(f"Error creating table: {e}")
-
-    def isexists(self, ftp_name, filepath):
-        if not self.cursor:
-            print('error mysql is closed')
-            return False
-        with self.conn:
-            try:
-
-                self.cursor.execute(f"SELECT * FROM {self.table_name} WHERE ftp_name = %s AND filepath = %s",
-                                    (ftp_name, filepath))
-                result = self.cursor.fetchone()
-                return bool(result) if result else False
-            except pymysql.Error as e:
-                print(f"Error checking if record exists: {e}")
-                return False
-
-    def savelog(self, ftp_name, filepath):
-        if not self.cursor:
-            print('error mysql is closed')
-            return False
-        now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-        with self.conn:
-            try:
-                self.cursor.execute(f"INSERT INTO {self.table_name} (ftp_name, filepath, log_time) VALUES (%s, %s, %s)",
-                                    (ftp_name, filepath, now))
-            except pymysql.IntegrityError:
-                # 数据库中已存在相同的记录
-                return False
-            except pymysql.Error as e:
-                print(f"Error inserting record: {e}")
-                return False
-            return True
-
-    def dellog_by_time(self, time=None):
-        if not self.cursor:
-            return False
-        if time is None:
-            time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-        with self.conn:
-            try:
-                self.cursor.execute(f"DELETE FROM {self.table_name} WHERE log_time < %s", (time,))
-            except pymysql.Error as e:
-                print(f"Error deleting records: {e}")
-                return False
-        return True
-
-    def __enter__(self):
-        return self
-
-    def __exit__(self, exc_type, exc_val, traceback):
-        try:
-            if not self.closedb:
-                if self.cursor:
-                    self.cursor.close()
-                if self.conn:
-                    if exc_type:
-                        print("ext")
-                        self.conn.rollback()
-                    else:
-                        self.conn.commit()
-                    self.conn.close()
-                self.closedb = True
-        except pymysql.Error:
-            pass
-
-    def __del__(self):
-        try:
-            if not self.closedb:
-                if self.cursor:
-                    self.cursor.close()
-                if self.conn:
-                    self.conn.close()
-                self.closedb = True
-        except pymysql.Error:
-            pass
+from TaskLogClass import *
+from ConfigureClass import *
 
 
 class FtpScanClass:
-    def __init__(self, ftpinfo):
-        self.ftpinfo = ftpinfo
+    def __init__(self):
+        self.ftpinfo = FTPInfo()
+        self.ftpinfo.read()
         self.ftp = None
+        self.mainstatus = ThreadInfo('main')
         try:
-            self.ftp = ftputil.FTPHost(self.ftpinfo['host'], self.ftpinfo['user'], self.ftpinfo['passwd'])
-        except FTPOSError as e:
-            raise Exception('Error for Ftp Connect: {}'.format(str(e)))
-        self.db = FtpDirDB()
+
+            self.ftp = ftputil.FTPHost(self.ftpinfo.host,
+                                       self.ftpinfo.user,
+                                       self.ftpinfo.passwd,
+                                       self.ftpinfo.port,
+                                       timeout=60)
+        except (FTPOSError, Exception) as e:
+            print('Error for Ftp Connect: {}'.format(str(e)))
+        self.db = DownLog()
 
     def scan_newfiles(self):
         """
         扫描FTP目录下所有文件，返回新增的文件列表
         :return: 新增的文件列表
         """
-        ftp_name = self.ftpinfo['name']
-        ftp_path = self.ftpinfo['sync_path']
+        self.ftpinfo.read()
+        ftp_path = self.ftpinfo.sync_path
+        scan_filter = self.ftpinfo.scan_filter.split('|')
         new_files = []
         try:
             for root, dirs, files in self.ftp.walk(ftp_path):
                 for name in files:
                     # 判断是否zip文件和是否在数据库中，不在则添加到新文件列表中
                     ftp_file = self.ftp.path.join(root, name)
-                    print(ftp_file)
-                    if ftp_file.endswith('.zip') and self.db.isexists(ftp_name, ftp_file):
-                        new_files.append(ftp_file)
-            return new_files
-        except FTPOSError as e:
+                    if ftp_file.endswith('.zip') and not self.db.isexists(ftp_file):
+                        dir_name = self.ftp.path.dirname(ftp_path)
+                        if not any(temp_dir in dir_name for temp_dir in scan_filter):
+                            new_files.append(ftp_file)
+
+        except (FTPOSError, Exception) as e:
             print("Error occurred while scanning New FTP directory:", e)
             return []
+
+        # 按照文件大小排序
+        sorted_files = sorted(new_files, key=lambda f: self.ftp.stat(f).st_size)
+        return sorted_files
 
     def save_all_files_log(self):
         """
         将FTP服务器中所有zip文件路径录入数据库
         """
-        ftp_name = self.ftpinfo['name']
-        ftp_path = self.ftpinfo['sync_path']
+        self.ftpinfo.read()
+        ftp_path = self.ftpinfo.sync_path
         try:
             for root, dirs, files in self.ftp.walk(ftp_path):
                 for name in files:
                     ftp_file = self.ftp.path.join(root, name)
                     if not ftp_file.endswith('.zip'):
                         continue
-                    print(self.db.isexists(ftp_name, ftp_file))
-                    if self.db.isexists(ftp_name, ftp_file):
+                    print(self.db.isexists(ftp_file))
+                    if self.db.isexists(ftp_file):
                         continue
-                    self.db.savelog(ftp_name, ftp_file)
-        except FTPOSError as e:
+                    self.db.savelog(ftp_file)
+        except (FTPOSError, Exception) as e:
             print("Error occurred while scanning All FTP directory:", e)
             return False
         return True
 
-    def __del__(self):
-        self.ftp.close()
-
-
-class MroParseClass:
-    """
-    MRO文件处理程序
-    """
-
-    def __init__(self, ftp_info, filepath):
-        self.ftp_info = ftp_info
-        self.ftp = None
-        self.filepath = filepath
-
-    def file_download(self):
+    def file_download(self, filepath):
         """
         下载zip文件并返回本地路径
         """
         try:
-            with ftputil.FTPHost(self.ftp_info['host'], self.ftp_info['user'], self.ftp_info['passwd'],
+            self.ftpinfo.read()
+            with ftputil.FTPHost(self.ftpinfo.host, self.ftpinfo.user, self.ftpinfo.passwd, self.ftpinfo.port,
                                  timeout=60) as ftp:
-                ftp_path = os.path.dirname(self.filepath)
+                ftp_path = os.path.dirname(filepath)
                 ftp.chdir(ftp_path)
-                download_path = os.path.join(self.ftp_info['sync_path'], self.ftp_info['name'], self.filepath)
+                download_path = os.path.join(
+                    self.ftpinfo.down_path,
+                    self.ftpinfo.ftp_name,
+                    *os.path.normpath(filepath).split(os.path.sep))
+
                 os.makedirs(os.path.dirname(download_path), exist_ok=True)
-                ftp.download(self.filepath, download_path)
-                return download_path
-        except ftputil.error.FTPOSError as e:
-            print(f"Error occurred while connecting to FTP server[{self.ftp_info['name']}]: {e}")
-            return ''
-        except ftputil.error.FTPIOError as e:
-            print(f"Error occurred while downloading file {self.filepath}: {e}")
-            return ''
+                # 获取文件初始大小
+                init_size = ftp.stat(filepath).st_size
+                # 记录文件大小变化时间戳
+                size_change_time = time.time()
+                # 检测文件大小是否发生变化，如果在一段时间内文件大小未发生变化则开始下载
+                while True:
+                    if not self.mainstatus.status:
+                        break
+                    time.sleep(3)  # 暂停3秒
+                    cur_size = ftp.stat(filepath).st_size
+                    if cur_size != init_size:
+                        init_size = cur_size
+                        size_change_time = time.time()
+                    elif time.time() - size_change_time >= 9:
+                        # 文件大小未发生变化9秒，判定为对方已经上传完成
+                        ftp.download(filepath, download_path)
+                        return download_path
 
-    def file_parse(self, file_path):
+        except (ftputil.error.FTPIOError, Exception) as e:
+            print(f"Error occurred while downloading file {filepath}: {e}")
+            return None
 
-        return True
+    def __del__(self):
+        if self.ftp is not None:
+            self.ftp.close()
