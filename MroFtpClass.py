@@ -1,10 +1,10 @@
-import threading
 import time
-
+import uuid
 import ftputil
-from ftputil.error import FTPOSError
+import threading
+import multiprocessing
 from TaskLogClass import *
-from ConfigureClass import *
+from ftputil.error import FTPOSError
 
 
 class FtpScanClass:
@@ -123,7 +123,7 @@ class FtpScanClass:
 
 
 class FtpScanThread(threading.Thread):
-    def __init__(self, thread_status, interval):
+    def __init__(self, thread_status, interval=60):
         super().__init__()
         self.interval = interval
         self.status = thread_status
@@ -157,3 +157,98 @@ class FtpScanThread(threading.Thread):
 
     def stop(self):
         self.status.set_status(False)
+
+
+class MroTaskScan(threading.Thread):
+    """
+    任务扫描线程类
+    """
+
+    def __init__(self, task, max_process):
+        super().__init__()
+        self.task = task
+        self.max_process = max_process
+        self._stop_event = threading.Event()
+        self.process_map = {}
+
+    def stop(self):
+        """
+        停止线程
+        """
+        self._stop_event.set()
+        # 向 MroParse 进程发送停止命令
+        for process_id, process in self.process_map.items():
+            process.stop_parse()
+            process.join()
+
+    def stopped(self):
+        """
+        判断线程是否停止
+        """
+        return self._stop_event.is_set()
+
+    def run(self):
+        """
+        线程执行的任务
+        """
+
+        while not self.stopped():
+            # 判断MroParse进程数量是否达到最大值
+            if len(self.process_map) >= self.max_process:
+                time.sleep(1)
+                continue
+            # 获取一个未开始的任务
+            task_list = self.task.task_get_by_status(ftp_name='test', status='unparse', quantity=1)
+            if not task_list:
+                continue
+            task = task_list[0]
+            ftp_name, local_path, subpack = task[1], task[2], task[3]
+            # 把任务的状态修改为parseing
+            # 后续需要添加一个时间字段，当任务超过一小时则判定为执行失败，然后把状态改回unparse,或者判定进程是否存在以作为判定
+            self.task.task_set_status(ftp_name, local_path, subpack, 'parseing')
+            # 启动MroParse进程
+            p = MroParseProc(ftp_name, local_path, subpack)
+            p.start()
+            self.process_map[p.process_id] = p
+
+
+class MroParseProc(multiprocessing.Process):
+    process_list = []
+
+    def __init__(self, ftp_name, local_path, subpack):
+        super().__init__()
+        self.ftp_name = ftp_name
+        self.local_path = local_path
+        self.subpack = subpack
+        self.running = True
+        self.process_id = str(uuid.uuid4())[:8]
+        self.closed_event = multiprocessing.Event()
+
+    def run(self):
+        # 向管理器中注册进程
+        self.register_parse()
+        try:
+            while self.running:
+                pass
+            # 执行处理流程
+            self.running = False
+        except Exception as e:
+            # 当任务失败需要回退任务状态
+            print(f"Exception occurred in MroParse: {e}")
+        finally:
+            self.closed_event.set()
+            # 从管理器中注销进程
+            self.unregister_parse()
+
+    def stop_parse(self):
+        """
+        停止进程
+        """
+        self.running = False
+        self.closed_event.wait()
+
+    def register_parse(self):
+        MroParseProc.process_list.append(self.process_id)
+
+    def unregister_parse(self):
+        MroParseProc.process_list.remove(self.process_id)
