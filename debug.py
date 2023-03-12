@@ -1,26 +1,21 @@
-import os
+import threading
 import time
 
-import filetype
-import patoolib
-import ConfigureClass
-import psutil
+
+def print_text(text, sleep_time):
+    time.sleep(3)
+    print("thread is running")
+    time.sleep(sleep_time)
+    print(text)
 
 
+threads = []
+for i in range(3):
+    t = threading.Thread(target=print_text, args=(f'Thread {i}', 3))
+    threads.append(t)
+    t.start()
 
+for t in threads:
+    t.join()
 
-def is_supported_archive(filepath):
-    # 获取文件的MIME类型
-    file_stream = open(filepath, 'rb')
-    file_type = filetype.guess_extension(file_stream)
-    print(file_type)
-    file_stream.close()
-    print(patoolib.ArchiveFormats)
-    print(file_type in patoolib.ArchiveFormats)
-
-
-if __name__ == '__main__':
-    # is_supported_archive('E:\\Users\\NIXEVOL\\Downloads\\迅雷下载\\MRO数据样板\\TD-LTE_MRO_ZTE_OMC1_20230214173000.zip')
-    # 获取 CPU 核心数
-    while True:
-        print(psutil.cpu_percent(interval=1, percpu=True))
+print('All threads have finished.')
